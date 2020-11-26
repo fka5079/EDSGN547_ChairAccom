@@ -1,0 +1,370 @@
+---
+title: "Individual Design Project"
+author: 'Fariha Azhar'
+output: 
+  html_document:
+    number_sections: true
+    theme: readable
+    toc: true
+    toc_float: true
+
+---
+
+```{r Import data, echo = FALSE}
+
+# Import ANSUR data for men and women
+require("dplyr")
+a2f_o <- read.delim('ANSUR_II_FEMALE_Public.csv', sep = ",")
+a2m_o <- read.delim('ANSUR_II_MALE_Public.csv', sep = ",")
+# Narrow ANSUR II data down 20-60 years of age
+a2f_1 <- a2f_o[a2f_o$Age > "20" & a2f_o$Age < "60", ]
+a2m_1 <- a2m_o[a2m_o$Age  > "20" & a2m_o$Age < "60", ]
+# Narrow ANSUR II data down by White and Black race
+a2f <- a2f_1[a2f_1$DODRace == "1" | a2f_1$DODRace == "2", ]
+a2m <- a2m_1[a2m_1$DODRace == "1" | a2m_1$DODRace == "2", ]
+# Add BMI to ANSUR II data
+a2f$BMI <- (a2f$weightkg/10)/(a2f$stature/1000)^2
+a2m$BMI <- (a2m$weightkg/10)/(a2m$stature/1000)^2
+
+# Import NHANES data for men and women
+nf <- read.csv('NHANES13-16_womenAge20YearsAndOver.csv')
+nm <- read.csv('NHANES13-16_menAge20YearsAndOver.csv')
+# Narrow NHANES data down 20-60 years of age
+nf <- nf[nf$RIDAGEYR > "23" & nf$RIDAGEYR < "60", ]
+nm <- nm[nm$RIDAGEYR > "23" & nm$RIDAGEYR < "60", ]
+# Narrow NHANES data down by non-Hispanic White and non-Hispanic Black race
+nf <- nf[nf$RIDRETH3 == "3" | nf$RIDRETH3 == "4", ]
+nm <- nm[nm$RIDRETH3 == "3" | nm$RIDRETH3 == "4", ]
+
+quan <- c(1,5,10,25,50,75,95,99)/100
+
+# Eliminate rows without stature (which means no trochanter either)
+nm <- nm[ complete.cases(nm$BMXHT), ]
+nf <- nf[ complete.cases(nf$BMXHT), ]
+
+# 50:50 male:female weight
+nf$wt5050 <- ( sum( nm$combinedWeight ) / sum( nf$combinedWeight) ) * nf$combinedWeight
+nm$wt5050 <- nm$combinedWeight
+
+# Check to make sure the weights work (this should be 1)
+sum( nf$wt5050 ) / sum( nm$wt5050 )
+
+```
+
+```{r Functions, echo = FALSE}
+
+Reg_Res <- function(predictor, response, preNew, withResVar = TRUE)
+  
+{
+  RegModel <- lm(response~predictor)
+  
+  if (withResVar)
+  {
+    newResponse <- RegModel$coefficients[1] + RegModel$coefficients[2] * preNew + rnorm(length(preNew), mean=0, sd = sqrt(sum(RegModel$residuals^2)/RegModel$df.residual))
+    uplim <- mean( newResponse ) + 4*sd( newResponse )
+    lowlim <- mean( newResponse ) - 4*sd( newResponse )
+    newResponse[ newResponse <= lowlim ] <- lowlim
+    newResponse[ newResponse >= uplim ] <- uplim
+    
+  }
+  else
+  {
+    newResponse <- RegModel$coefficients[1] + RegModel$coefficients[2] * preNew
+  }
+  
+  return(newResponse)
+}
+
+# Multiple predictors
+MultiReg_Res <- function( predictor1, predictor2, response, preNew1, preNew2, withResVar=TRUE ) 
+  
+{
+  regModel <- lm( response ~ predictor1 + predictor2 )
+
+  if ( withResVar )
+  {
+    newResponse <- regModel$coefficients[ 1 ] + (regModel$coefficients[ 2 ]*preNew1) + (regModel$coefficients[ 3 ]*preNew2) + rnorm( length( preNew2 ), mean=0, sd=sqrt(sum(regModel$residuals^2)/regModel$df.residual) )  
+    
+    uplim <- mean( newResponse ) + 4*sd( newResponse )
+    lowlim <- mean( newResponse ) - 4*sd( newResponse )
+    newResponse[ newResponse <= lowlim ] <- lowlim
+    newResponse[ newResponse >= uplim ] <- uplim
+    
+  }
+  else
+  {
+    newResponse <- regModel$coefficients[ 1 ] + regModel$coefficients[ 2 ]*preNew1 + regModel$coefficients[ 3 ]*preNew2     
+  }
+
+  return( newResponse )
+
+}
+
+```
+
+```{r Back Rest, echo = FALSE}
+
+# Check r squared value
+with(a2m, pairs(a2m[c("stature", "BMI", "bideltoidbreadth", "cervicaleheight")], col='gray', pch=20))
+
+
+# Backrest Estimate
+
+# Bideltoid breadth estimate
+nm$bideltoidbreadth_est <- Reg_Res(predictor = a2m$BMI, response = a2m$bideltoidbreadth, preNew = nm$BMXBMI)
+nf$bideltoidbreadth_est <- Reg_Res(predictor = a2f$BMI, response = a2f$bideltoidbreadth, preNew = nf$BMXBMI)
+
+# Cervical height estimate
+nm$cervicalHT_est <- Reg_Res(predictor = a2m$stature, response = a2m$cervicaleheight, preNew = nm$BMXHT)
+nf$cervicalHT_est <- Reg_Res(predictor = a2f$stature, response = a2f$cervicaleheight, preNew = nf$BMXHT)
+
+```
+
+```{r Hand Rest, echo = FALSE}
+
+# Checking for correlation
+with(a2m, pairs(a2m[c("stature", "BMI", "elbowrestheight", "forearmforearmbreadth", "forearmcenterofgriplength")], col='gray', pch=20))
+
+# Checking elbow rest height correlation
+elbowrestheightModel <- lm(a2m$elbowrestheight ~ a2m$stature+a2m$BMI)
+summary(elbowrestheightModel)
+elbowrestHT_Est <- elbowrestheightModel$coefficients[1] + elbowrestheightModel$coefficients[2]*a2m$stature + elbowrestheightModel$coefficients[3]*a2m$BMI
+plot(a2m$stature+a2m$BMI, a2m$elbowrestheight, pch=19, cex = 0.15, col="blue")
+points(a2m$stature+a2m$BMI, elbowrestHT_Est, col = "green")
+
+# Elbow rest height estimates for US civilians
+nm$elbowrestht_est <- MultiReg_Res(predictor1 = a2m$stature, predictor2 = a2m$BMI, response = a2m$elbowrestheight, preNew1 = nm$BMXHT, preNew2 = nm$BMXBMI)
+nf$elbowrestht_est <- MultiReg_Res(predictor1 = a2f$stature, predictor2 = a2f$BMI, response = a2f$elbowrestheight, preNew1 = nf$BMXHT, preNew2 = nf$BMXBMI)
+
+
+# Forearm center of grip length estimates for US civilians
+nm$forearmcog_est <- Reg_Res(predictor = a2m$stature, response = a2m$forearmcenterofgriplength, preNew = nm$BMXHT)
+nf$forearmcog_est <- Reg_Res(predictor = a2f$stature, response = a2f$forearmcenterofgriplength, preNew = nf$BMXHT)
+
+
+# Forearm-forearm breadth estimates for US civilians
+nm$forearmforearm_est <- MultiReg_Res(predictor1 = a2m$stature, predictor2 = a2m$BMI, response = a2m$forearmforearmbreadth, preNew1 = nm$BMXHT, preNew2 = nm$BMXBMI)
+nf$forearmforearm_est <- MultiReg_Res(predictor1 = a2f$stature, predictor2 = a2f$BMI, response = a2f$forearmforearmbreadth, preNew1 = nf$BMXHT, preNew2 = nf$BMXBMI)
+
+```
+
+```{r Seat Pan, echo = FALSE}
+
+# Checking for correlation
+with(a2m, pairs(a2m[c("stature", "BMI", "buttockpopliteallength", "hipbreadthsitting", "poplitealheight")], col='gray', pch=20))
+
+
+# Buttock popliteal length estimate for US civilians
+nm$butpoplength_est <- Reg_Res(a2m$stature, a2m$buttockpopliteallength, nm$BMXHT)
+nf$butpoplength_est <- Reg_Res(a2f$stature, a2f$buttockpopliteallength, nf$BMXHT)
+
+
+# Seated hip breadth estimate for US civilians
+nm$hipbreadthsit_est <- MultiReg_Res(predictor1 = a2m$stature, predictor2 = a2m$BMI, response = a2m$hipbreadthsitting, preNew1 = nm$BMXHT, preNew2 = nm$BMXBMI)
+nf$hipbreadthsit_est <- MultiReg_Res(predictor1 = a2f$stature, predictor2 = a2f$BMI, response = a2f$hipbreadthsitting, preNew1 = nf$BMXHT, preNew2 = nf$BMXBMI)
+
+# Popliteal Height estimates for US civilians
+nm$popHT_est <- Reg_Res(a2m$stature, a2m$poplitealheight, nm$BMXHT) + 25
+nf$popHT_est <- Reg_Res(a2f$stature, a2f$poplitealheight, nf$BMXHT) + 25
+
+```
+
+
+```{r Second Hand Dimension Calc, echo = FALSE}
+
+# Calculating depth of lumbar support
+nm$lumbardepth_est <- nm$chestdepth_est - nm$abdominalexdepth_est
+nf$lumbardepth_est <- nf$chestdepth_est - nf$abdominalexdepth_est
+
+# Calculating total chair height
+nm$totchairht_est <- nm$cervicalHT_est + nm$popHT_est
+nf$totchairht_est <- nf$cervicalHT_est + nf$popHT_est
+
+```
+
+
+```{r Quantile_Calculations, echo = FALSE}
+
+require(Hmisc)
+
+n <- rbind(nm, nf)
+
+#backrest width
+print("Backrest Width Estimates")
+round(wtd.quantile(n$bideltoidbreadth_est, weights = n$wt5050, quan))
+plot(density(wtd.quantile(n$bideltoidbreadth_est, weights = n$wt5050, quan)), main = "Density plot for Backrest Width Estimates")
+
+#backrest height
+print("Backrest Height Estimates")
+round(wtd.quantile(n$cervicalHT_est, weights = n$wt5050, quan))
+
+#total height
+print('Total Chair Height Estimates')
+round(wtd.quantile(n$totchairht_est, weights = n$wt5050, quan))
+
+#arm rest height
+print('Arm Rest Height Estimates')
+round(wtd.quantile(n$elbowrestht_est, weights = n$wt5050, quan))
+
+#arm rest separation
+print('Arm Rest Seperation Distance Estimates')
+round(wtd.quantile(n$forearmforearm_est, weights = n$wt5050, quan))
+
+#arm rest length
+print('Arm Rest Length Estimates')
+round(wtd.quantile(n$forearmcog_est, weights = n$wt5050, quan))
+
+#seat pan height
+print('Seat Pan Height Estimates')
+round(wtd.quantile(n$popHT_est, weights = n$wt5050, quan))
+
+#seat pan depth
+print("Seat Pan Depth Estimates")
+round(wtd.quantile(n$butpoplength_est, weights = n$wt5050, quan))
+
+#seat pan width
+print("Seat Pan Width Estimates")
+round(wtd.quantile(n$hipbreadthsit_est, weights = n$wt5050, quan))
+
+```
+
+
+```{r HM Aeron Benchmark, echo = FALSE}
+
+# total height accom
+n$totchairht_accom <- (n$totchairht_est > 978)
+print("Percentage of US civilian population accommodated for total chair height:")
+sum( n[n$totchairht_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# Backrest width accom missing
+
+
+# arm rest height accom
+n$handrestHT_accom <- (n$elbowrestht_est > 173) & (n$elbowrestht_est < 274)
+print("Percentage of US civilian population accommodated for hand rest height:")
+sum( n[n$handrestHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest length accom missing
+n$handrestlength_accom <- (n$forearmcog_est > 338-32) & (n$forearmcog_est < 338+32)
+print("Percentage of US civilian population accommodated for hand rest length:")
+sum( n[n$handrestlength_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest separation accom missing
+
+# seat pan height accom
+n$seatHT_accom <- (n$popHT_est < 521) & (n$popHT_est > 374)
+print("Percentage of US civilian population accommodated for seat height:")
+sum( n[n$seatHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan depth accom
+n$seatdepth_accom <- (n$butpoplength_est > 406)
+print("Percentage of US civilian population accommodated for seat depth:")
+sum( n[n$seatdepth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan width accom missing
+
+
+# Total accommodation
+n$tot_accom <- n$handrestHT_accom & n$seatHT_accom & n$seatdepth_accom & n$handrestlength_accom
+print("Total accommodation for Herman Miller Aeron Task Chairs:")
+sum( n[n$tot_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+```
+
+```{r Amia, echo = FALSE}
+
+# Backrest height accom missing
+n$backrestht_accom <- (n$cervicalHT_est > 635)
+print("Percentage of US civilian population accommodated for backrest height:")
+sum( n[n$backrestht_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# Backrest width
+n$backrestwidth_accom <- (n$bideltoidbreadth_est < 476)
+print("Percentage of US civilian population accommodated for handback rest width:")
+sum( n[n$backrestwidth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest height accom
+n$handrestHT_accom <- (n$elbowrestht_est > 178) & (n$elbowrestht_est < 279)
+print("Percentage of US civilian population accommodated for hand rest height:")
+sum( n[n$handrestHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest length accom missing
+n$handrestlength_accom <- (n$forearmcog_est > 284) & (n$forearmcog_est < 389)
+print("Percentage of US civilian population accommodated for hand rest length:")
+sum( n[n$handrestlength_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest separation accom
+n$handrestsep_accom <- (n$forearmforearm_est > 381) & (n$forearmforearm_est < 495)
+print("Percentage of US civilian population accommodated for hand rest separation:")
+sum( n[n$handrestsep_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan height accom
+n$seatHT_accom <- (n$popHT_est < 533) & (n$popHT_est > 406)
+print("Percentage of US civilian population accommodated for seat height:")
+sum( n[n$seatHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan depth accom
+n$seatdepth_accom <- (n$butpoplength_est > 394 & n$butpoplength_est < 470)
+print("Percentage of US civilian population accommodated for seat depth:")
+sum( n[n$seatdepth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan width accom missing
+n$seatwidth_accom <- (n$hipbreadthsit_est < 502)
+print("Percentage of US civilian population accommodated for seat width:")
+sum( n[n$seatwidth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# Total accommodation
+n$tot_accom <- n$backrestht_accom & n$backrestwidth_accom & n$handrestHT_accom & n$handrestsep_accom & n$seatHT_accom & n$seatdepth_accom & n$seatwidth_accom
+print("Total accommodation for Herman Miller Aeron Task Chairs:")
+sum( n[n$tot_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+```
+
+```{r New Design, echo = FALSE}
+
+# Backrest width accom missing
+n$backrestht_accom <- (n$cervicalHT_est > 1291) & (n$cervicalHT_est < 1667)
+print("Percentage of US civilian population accommodated for backrest height:")
+sum( n[n$backrestht_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# Backrest width
+n$backrestwidth_accom <- (n$bideltoidbreadth_est > 351) & (n$bideltoidbreadth_est < 651)
+print("Percentage of US civilian population accommodated for handback rest width:")
+sum( n[n$backrestwidth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest height accom
+n$handrestHT_accom <- (n$elbowrestht_est > 174) & (n$elbowrestht_est < 316)
+print("Percentage of US civilian population accommodated for hand rest height:")
+sum( n[n$handrestHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest length accom missing
+n$handrestlength_accom <- (n$forearmcog_est > 284) & (n$forearmcog_est < 389)
+print("Percentage of US civilian population accommodated for hand rest length:")
+sum( n[n$handrestlength_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# arm rest separation accom
+n$handrestsep_accom <- (n$forearmforearm_est > 420) & (n$forearmforearm_est < 804)
+print("Percentage of US civilian population accommodated for hand rest separation:")
+sum( n[n$handrestsep_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan height accom
+n$seatHT_accom <- (n$popHT_est < 512) & (n$popHT_est > 367)
+print("Percentage of US civilian population accommodated for seat height:")
+sum( n[n$seatHT_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan depth accom
+n$seatdepth_accom <- (n$butpoplength_est > 432 & n$butpoplength_est < 566)
+print("Percentage of US civilian population accommodated for seat depth:")
+sum( n[n$seatdepth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# seat pan width accom missing
+n$seatwidth_accom <- (n$hipbreadthsit_est > 320 & n$hipbreadthsit_est < 577)
+print("Percentage of US civilian population accommodated for seat width:")
+sum( n[n$seatwidth_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+# Total accommodation
+n$tot_accom <- n$backrestht_accom & n$backrestwidth_accom & n$handrestHT_accom & n$handrestlength_accom & n$handrestsep_accom & n$seatHT_accom & n$seatdepth_accom & n$seatwidth_accom
+print("Total accommodation for Herman Miller Aeron Task Chairs:")
+sum( n[n$tot_accom, 'wt5050'], na.rm = TRUE) / sum(n$wt5050, na.rm = TRUE) * 100
+
+```
